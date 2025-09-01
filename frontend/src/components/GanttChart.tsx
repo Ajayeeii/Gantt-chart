@@ -99,6 +99,118 @@ const GanttChart: React.FC = () => {
 
         return [parent, ...children];
     };
+    // --- place inside GanttChart (above the return) ---
+
+    const TaskListHeader: React.FC<{
+        headerHeight: number;
+        rowWidth: string;
+        fontFamily: string;
+        fontSize: string;
+    }> = ({ headerHeight, rowWidth, fontFamily, fontSize }) => {
+        return (
+            <div
+                style={{
+                    display: "flex",
+                    alignItems: "center",
+                    height: headerHeight,
+                    width: rowWidth,
+                    fontFamily,
+                    fontSize,
+                    borderBottom: "1px solid rgba(0,0,0,0.08)",
+                }}
+            >
+                <div style={{ flex: "0 0 110px", padding: "6px 8px", fontWeight: 600 }}>
+                    Project ID
+                </div>
+                <div style={{ flex: "0 0 150px", padding: "6px 8px", fontWeight: 600 }}>
+                    Manager
+                </div>
+                <div style={{ flex: "0 0 130px", padding: "6px 8px", fontWeight: 600 }}>
+                    Start Date
+                </div>
+                <div style={{ flex: "0 0 130px", padding: "6px 8px", fontWeight: 600 }}>
+                    End Date
+                </div>
+
+            </div>
+        );
+    };
+
+    const TaskListTable: React.FC<{
+        rowHeight: number;
+        rowWidth: string;
+        fontFamily: string;
+        fontSize: string;
+        locale: string;
+        tasks: Task[];
+        selectedTaskId: string;
+        setSelectedTask: (taskId: string) => void;
+    }> = ({ rowHeight, rowWidth, fontFamily, fontSize, locale, tasks, selectedTaskId, setSelectedTask }) => {
+        return (
+            <div style={{ width: rowWidth, fontFamily, fontSize }}>
+                {tasks.map((t) => {
+                    // Show the parent project id for both parent and child rows:
+                    const projectId = t.type === "project" ? t.id : (t.project || t.id);
+
+                    // Look up backend project to show manager (backendTasks is in outer scope)
+                    const parent = backendTasks.find((b) => b.id === projectId);
+                    const manager = parent?.project_manager || "N/A";
+
+                    const startStr =
+                        t.start instanceof Date
+                            ? t.start.toLocaleDateString(locale)
+                            : String(t.start);
+                    const endStr =
+                        t.end instanceof Date ? t.end.toLocaleDateString(locale) : String(t.end);
+
+                    const isSelected = selectedTaskId === t.id;
+
+                    return (
+                        <div
+                            key={t.id}
+                            onClick={() => setSelectedTask(t.id)}
+                            style={{
+                                display: "flex",
+                                alignItems: "center",
+                                height: rowHeight,
+                                background: isSelected ? "rgba(0,0,0,0.04)" : undefined,
+                                cursor: "pointer",
+                                borderBottom: "1px solid rgba(0,0,0,0.04)",
+                            }}
+                        >
+                            <div
+                                style={{
+                                    flex: "0 0 110px",
+                                    padding: "4px 8px",
+                                    overflow: "hidden",
+                                    textOverflow: "ellipsis",
+                                    whiteSpace: "nowrap",
+                                }}
+                            >
+                                {projectId}
+                            </div>
+
+                            <div
+                                style={{
+                                    flex: "0 0 180px",
+                                    padding: "4px 8px",
+                                    overflow: "hidden",
+                                    textOverflow: "ellipsis",
+                                    whiteSpace: "nowrap",
+                                }}
+                            >
+                                {manager}
+                            </div>
+
+                            <div style={{ flex: "0 0 130px", padding: "4px 8px" }}>{startStr}</div>
+
+                            <div style={{ flex: "0 0 130px", padding: "4px 8px" }}>{endStr}</div>
+                        </div>
+                    );
+                })}
+            </div>
+        );
+    };
 
     useEffect(() => {
         fetch("http://localhost:5000/gantt-data")
@@ -284,8 +396,12 @@ const GanttChart: React.FC = () => {
                                 onClick={handleTaskClick}
                                 columnWidth={80}
                                 rowHeight={40}
-                                listCellWidth="220px"
+                                listCellWidth="600px"           // make wide enough for columns
+                                TaskListHeader={TaskListHeader}
+                                TaskListTable={TaskListTable}
                             />
+
+
                         ) : (
                             <p>No valid tasks to display...</p>
                         )}
