@@ -39,7 +39,7 @@ def fetch_data():
     conn = mysql.connector.connect(**DB_CONFIG)
     cursor = conn.cursor(dictionary=True)
 
-    # Fetch projects (now with state, project_manager, project_details, p_team, assign_to)
+    # Fetch projects
     cursor.execute(
         """
         SELECT 
@@ -50,7 +50,7 @@ def fetch_data():
     )
     projects = cursor.fetchall()
 
-    # Fetch subprojects (now with subproject_details, assign_to, p_team)
+    # Fetch subprojects
     cursor.execute(
         """
         SELECT 
@@ -61,30 +61,42 @@ def fetch_data():
     )
     subprojects = cursor.fetchall()
 
+    # Fetch invoices (new)
+    cursor.execute(
+        """
+        SELECT 
+            project_id, invoice_number, service_date, due_date, 
+            payment_status, amount, comments
+        FROM csa_finance_invoiced 
+        """
+    )
+    invoices = cursor.fetchall()
+
     cursor.close()
     conn.close()
 
     # Build parent projects map
     project_map = {}
     for p in projects:
-        pid = int(p["project_id"])  # normalize to int
+        pid = int(p["project_id"])
         project_map[pid] = {
             "id": f"P{pid}",
             "name": p["project_name"],
             "start": to_iso(p["start_date"]),
             "end": to_iso(p["end_date"]),
-            "urgency": (p["urgency"] or "").strip().lower(),  # 🔹 new field
+            "urgency": (p["urgency"] or "").strip().lower(),
             "state": p.get("state"),
             "project_manager": p.get("project_manager"),
             "project_details": p.get("project_details"),
             "p_team": p.get("p_team"),
             "assign_to": p.get("assign_to"),
             "children": [],
+            "invoices": [],   # 🔹 Add invoices array
         }
 
-    # Attach subprojects under parent projects
+    # Attach subprojects
     for sp in subprojects:
-        pid = int(sp["project_id"])  # normalize to int
+        pid = int(sp["project_id"])
         if pid in project_map:
             sp_start = to_iso(sp["start_date"])
             sp_end = to_iso(sp["sub_end_date"])
@@ -95,9 +107,7 @@ def fetch_data():
                         "name": sp["subproject_name"],
                         "start": sp_start,
                         "end": sp_end,
-                        "urgency": (sp["urgency"] or "")
-                        .strip()
-                        .lower(),  # 🔹 new field
+                        "urgency": (sp["urgency"] or "").strip().lower(),
                         "status": sp.get("subproject_status"),
                         "subproject_details": sp.get("subproject_details"),
                         "p_team": sp.get("p_team"),
@@ -105,7 +115,22 @@ def fetch_data():
                     }
                 )
 
-    # ✅ Sort subprojects under each parent by subproject_status
+    # ✅ Attach invoices to projects
+    for inv in invoices:
+        pid = int(inv["project_id"])
+        if pid in project_map:
+            project_map[pid]["invoices"].append(
+                {
+                    "invoice_number": inv.get("invoice_number"),
+                    "service_date": inv.get("service_date"),
+                    "due_date": to_iso(inv.get("due_date")),
+                    "payment_status": inv.get("payment_status"),
+                    "amount": inv.get("amount"),
+                    "comments": inv.get("comments"),
+                }
+            )
+
+    # ✅ Sort subprojects
     for pid, project in project_map.items():
         project["children"].sort(
             key=lambda x: (
@@ -114,6 +139,7 @@ def fetch_data():
         )
 
     return list(project_map.values())
+
 
 
 @app.route("/health")
