@@ -1,43 +1,45 @@
-import React from "react";
 import GanttChart from "./components/GanttChart.tsx";
-import { Container, Box, Typography, Paper } from "@mui/material";
+import { Container, Box, Paper, useTheme, useMediaQuery } from "@mui/material";
 
 function App() {
-  return (
-    <Container maxWidth="xl" sx={{ py: 4 }}>
-      {/* Header */}
-      <Box
-        sx={{
-          mb: 4,
-          textAlign: "center",
-          p: 3,
-          borderRadius: 3,
-          background: "linear-gradient(135deg, #1976d2, #42a5f5)",
-          color: "white",
-          boxShadow: 3,
-        }}
-      >
-        <Typography variant="h3" fontWeight="bold">
-          CSA Project Gantt Chart
-        </Typography>
-        <Typography variant="subtitle1" sx={{ mt: 1 }}>
-          Track the and timelines visually
-        </Typography>
-      </Box>
+  const theme = useTheme();
+  const isLargeScreen = useMediaQuery(theme.breakpoints.up('lg'));
+  const isSmallScreen = useMediaQuery(theme.breakpoints.down('md'));
 
+  return (
+    <Container
+      maxWidth={isLargeScreen ? false : "xl"}
+      disableGutters={isLargeScreen}
+      sx={{
+        display: "flex",
+        flexDirection: "column",
+        minHeight: "100vh",
+        py: isSmallScreen ? 2 : 4,
+        px: isLargeScreen ? 4 : 0,
+        width: "100%",
+        maxWidth: isLargeScreen ? "none" : "100%",
+        overflow: "hidden",   // ✅ prevent outer scrollbars
+      }}
+    >
       {/* Chart Section */}
       <Paper
-        elevation={3}
+        elevation={isSmallScreen ? 1 : 3}
         sx={{
-          p: 2,
-          borderRadius: 3,
-          overflow: "hidden",
-          minHeight: "600px",
+          p: isSmallScreen ? 1 : 2,
+          borderRadius: 2,
+          flexGrow: 1,
+          width: "100%",
+          mx: "auto",
+          overflow: "hidden",  // ✅ keep chart inside
         }}
       >
-        <GanttChart />
+        <Box sx={{ height: "100%", overflow: "auto" }}>
+          {/* ✅ only this Box scrolls */}
+          <GanttChart />
+        </Box>
       </Paper>
     </Container>
+
   );
 }
 

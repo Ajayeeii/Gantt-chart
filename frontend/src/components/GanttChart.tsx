@@ -1,25 +1,8 @@
 import React, { useEffect, useState } from "react";
 import { Gantt, type Task, ViewMode } from "gantt-task-react";
 import "gantt-task-react/dist/index.css";
-import {
-    Box,
-    Typography,
-    FormControl,
-    InputLabel,
-    Select,
-    MenuItem,
-    TextField,
-    Button,
-    Modal,
-    Backdrop,
-    Fade,
-    Paper,
-    Table,
-    TableBody,
-    TableCell,
-    TableHead,
-    TableRow,
-} from "@mui/material";
+import { Box, Typography, FormControl, InputLabel, Select, MenuItem, TextField, Button, Modal, Backdrop, Fade, Paper, Table, TableBody, TableCell, TableHead, TableRow, useTheme, useMediaQuery, } from "@mui/material";
+
 interface Invoice {
     invoice_number: string;
     service_number: string;
@@ -28,26 +11,31 @@ interface Invoice {
     amount: number;
     comment: string;
 }
+
 interface BackendTask {
     assign_to: string;
-    children: BackendTask[];   // nested subprojects
-    color?: string;            // optional (not always in backend)
+    children: BackendTask[];
+    color?: string;
     end: string;
-    id: string;                // "P1", "SP1_1" etc.
+    id: string;
     name: string;
     p_team: string;
-    project_details?: string;  // main projects
-    subproject_details?: string; // subprojects
+    project_details?: string;
+    subproject_details?: string;
     project_manager?: string;
     start: string;
     state: string | null;
     urgency?: string;
-    parent_name: string | null;  // only for subprojects in UI
-    status?: string;             // subproject_status
-    invoices?: Invoice[];        // 🔹 new: finance info (projects only)
+    parent_name: string | null;
+    status?: string;
+    invoices?: Invoice[];
 }
 
 const GanttChart: React.FC = () => {
+    const theme = useTheme();
+    const isSmallScreen = useMediaQuery(theme.breakpoints.down('md'));
+    const isExtraSmallScreen = useMediaQuery(theme.breakpoints.down('sm'));
+
     const topScrollRef = React.useRef<HTMLDivElement>(null);
     const bottomScrollRef = React.useRef<HTMLDivElement>(null);
     const ganttContentRef = React.useRef<HTMLDivElement>(null);
@@ -89,15 +77,88 @@ const GanttChart: React.FC = () => {
         white: "#fefdfd",
         gray: "#bfbfbf",
     };
-
-    // Consistent column widths
-    const colWidths = {
-        id: "80px",
-        pm: "120px",
-        sd: "120px",
-        eed: "120px",
+    // Responsive column widths
+    const getColWidths = () => {
+        if (isExtraSmallScreen) {
+            return {
+                id: "60px",
+                pm: "80px",
+                sd: "90px",
+                eed: "90px",
+            };
+        } else if (isSmallScreen) {
+            return {
+                id: "70px",
+                pm: "100px",
+                sd: "110px",
+                eed: "110px",
+            };
+        }
+        return {
+            id: "80px",
+            pm: "120px",
+            sd: "120px",
+            eed: "120px",
+        };
     };
 
+    const colWidths = getColWidths();
+    // helper to detect near-white colors
+    const isNearWhite = (color: string) => {
+        const hex = color.replace("#", "").toLowerCase();
+        return ["ffffff", "fefefe", "fefdfd"].includes(hex);
+    };
+
+    const styleWithBorderFix = (color: string) => {
+        if (isNearWhite(color)) {
+            return {
+                progressColor: color,
+                backgroundColor: color,
+                border: "2px solid #000000ff", // noticeable border (dark gray)
+            };
+        }
+        return {
+            progressColor: color,
+            backgroundColor: color,
+        };
+    };
+    const addBoundaryTasks = (tasks: Task[]): Task[] => {
+        if (tasks.length === 0) return tasks;
+        const minStart = new Date(Math.min(...tasks.map(t => t.start.getTime())));
+        const maxEnd = new Date(Math.max(...tasks.map(t => t.end.getTime())));
+        // Create a buffer period (e.g., 5% of total timeline)
+        const totalDuration = maxEnd.getTime() - minStart.getTime();
+        const bufferDuration = totalDuration * 0.05; // 5% buffer
+        const bufferStart = new Date(minStart.getTime() - bufferDuration);
+        const bufferEnd = new Date(maxEnd.getTime() + bufferDuration);
+        // Use task types that will actually expand the timeline
+        const boundaryTasks: Task[] = [
+            {
+                id: "boundary-start",
+                name: "",
+                start: bufferStart,
+                end: new Date(bufferStart.getTime() + 1), // Ensure duration > 0
+                type: "task",
+                progress: 0,
+                isDisabled: true,
+                hideChildren: true,
+                styles: { progressColor: "transparent", backgroundColor: "transparent" }
+            },
+            {
+                id: "boundary-end",
+                name: "",
+                start: new Date(bufferEnd.getTime() - 1), // Ensure duration > 0
+                end: bufferEnd,
+                type: "task",
+                progress: 0,
+                isDisabled: true,
+                hideChildren: true,
+                styles: { progressColor: "transparent", backgroundColor: "transparent" }
+            },
+        ];
+
+        return [...tasks, ...boundaryTasks];
+    };
     const mapOneParent = (item: BackendTask): Task[] => {
         if (!item.start || !item.end) return [];
 
@@ -113,16 +174,17 @@ const GanttChart: React.FC = () => {
             type: "project",
             progress: 0,
             isDisabled: false,
-            styles: { progressColor: parentColor, backgroundColor: parentColor },
+            styles: styleWithBorderFix(parentColor),
         };
 
         const children: Task[] = (item.children || [])
-            .map((child) => {
+            .map((child, index) => {
                 if (!child.start || !child.end) return null;
                 const cStart = new Date(child.start);
                 const cEnd = new Date(child.end);
                 const childColor =
                     urgencyColors[child.urgency || "gray"] || "#bfbfbf";
+
                 return {
                     id: child.id,
                     name: `→ ${child.name}`,
@@ -132,156 +194,201 @@ const GanttChart: React.FC = () => {
                     project: item.id,
                     progress: 0,
                     isDisabled: false,
-                    styles: { progressColor: childColor, backgroundColor: childColor },
-                } as Task;
+                    styles: styleWithBorderFix(childColor),
+                    spIndex: index + 1,
+                } as Task & { spIndex?: number };
             })
-            .filter((c): c is Task => c !== null);
+            .filter((c): c is Task & { spIndex?: number } => c !== null);
 
         return [parent, ...children];
     };
-
     const TaskListHeader: React.FC<any> = ({
         headerHeight,
         rowWidth,
         fontFamily,
-        fontSize,
-    }) => (
-        <div
-            style={{
-                display: "flex",
-                alignItems: "center",
-                height: headerHeight,
-                lineHeight: `${headerHeight}px`,
-                width: rowWidth,
-                fontFamily,
-                fontSize,
-                fontWeight: 600,
-                borderBottom: "2px solid #ddd",
-                backgroundColor: "#f5f5f5",
-            }}
-        >
+    }) => {
+        const responsiveFontSize = isExtraSmallScreen ? "11px" : "14px";
+
+        return (
             <div
                 style={{
-                    flex: `0 0 ${colWidths.id}`,
-                    borderRight: "1px solid #ddd",
-                    padding: "0 8px",
+                    display: "flex",
+                    alignItems: "center",
+                    height: headerHeight,
+                    lineHeight: `${headerHeight}px`,
+                    width: rowWidth,
+                    fontFamily,
+                    fontSize: responsiveFontSize,
+                    fontWeight: 600,
+                    borderBottom: "2px solid #ddd",
+                    backgroundColor: "#f5f5f5",
                 }}
             >
-                ID
+                <div
+                    style={{
+                        flex: `0 0 ${colWidths.id}`,
+                        borderRight: "1px solid #ddd",
+                        padding: "0 4px",
+                        textAlign: "center",
+                    }}
+                >
+                    ID
+                </div>
+                <div
+                    style={{
+                        flex: `0 0 ${colWidths.pm}`,
+                        borderRight: "1px solid #ddd",
+                        padding: "0 4px",
+                        textAlign: "center",
+                    }}
+                >
+                    PM
+                </div>
+                <div
+                    style={{
+                        flex: `0 0 ${colWidths.sd}`,
+                        borderRight: "1px solid #ddd",
+                        padding: "0 4px",
+                        textAlign: "center",
+                    }}
+                >
+                    {isExtraSmallScreen ? "START" : "START DATE"}
+                </div>
+                <div
+                    style={{
+                        flex: `0 0 ${colWidths.eed}`,
+                        padding: "0 4px",
+                        textAlign: "center",
+                    }}
+                >
+                    ECD
+                </div>
             </div>
-            <div
-                style={{
-                    flex: `0 0 ${colWidths.pm}`,
-                    borderRight: "1px solid #ddd",
-                    padding: "0 8px",
-                }}
-            >
-                PM
-            </div>
-            <div
-                style={{
-                    flex: `0 0 ${colWidths.sd}`,
-                    borderRight: "1px solid #ddd",
-                    padding: "0 8px",
-                }}
-            >
-                SD
-            </div>
-            <div
-                style={{
-                    flex: `0 0 ${colWidths.eed}`,
-                    padding: "0 8px",
-                }}
-            >
-                EED
-            </div>
-        </div>
-    );
+        );
+    };
 
     const TaskListTable: React.FC<any> = ({
-        rowHeight,
         rowWidth,
         fontFamily,
-        fontSize,
         locale,
         tasks,
-    }) => (
-        <div style={{ width: rowWidth, fontFamily, fontSize }}>
-            {tasks.map((t: Task) => {
-                const projectId = t.type === "project" ? t.id : t.project || t.id;
-                const parent = backendTasks.find((b) => b.id === projectId);
-                const managerFull = parent?.project_manager || "N/A";
-                const manager = managerFull.split(" ")[0];
-                const startStr =
-                    t.start instanceof Date
-                        ? t.start.toLocaleDateString(locale)
-                        : String(t.start);
-                const endStr =
-                    t.end instanceof Date
-                        ? t.end.toLocaleDateString(locale)
-                        : String(t.end);
-                const isSelected = selectedTaskId === t.id;
+    }) => {
+        const responsiveFontSize = isExtraSmallScreen ? "11px" : "14px";
 
-                return (
-                    <div
-                        key={t.id}
-                        onClick={() => setSelectedTaskId(t.id)}
-                        style={{
-                            display: "flex",
-                            alignItems: "center",
-                            height: rowHeight,
-                            lineHeight: `${rowHeight}px`,
-                            cursor: "pointer",
-                            borderBottom: "1px solid #ddd",
-                            background: isSelected ? "rgba(0,0,0,0.04)" : undefined,
-                        }}
-                    >
+        return (
+            <div style={{ width: rowWidth, fontFamily, fontSize: responsiveFontSize }}>
+                {tasks.map((t: Task) => {
+                    const projectId = t.type === "project" ? t.id : t.project || t.id;
+                    const parent = backendTasks.find((b) => b.id === projectId);
+                    const managerFull = parent?.project_manager || "N/A";
+                    const manager = managerFull.split(" ")[0];
+                    const startStr =
+                        t.start instanceof Date
+                            ? isExtraSmallScreen
+                                ? t.start.toLocaleDateString(locale, { month: 'short', day: 'numeric' })
+                                : t.start.toLocaleDateString(locale)
+                            : String(t.start);
+                    const endStr =
+                        t.end instanceof Date
+                            ? isExtraSmallScreen
+                                ? t.end.toLocaleDateString(locale, { month: 'short', day: 'numeric' })
+                                : t.end.toLocaleDateString(locale)
+                            : String(t.end);
+                    const isSelected = selectedTaskId === t.id;
+
+                    return (
                         <div
+                            key={t.id}
+                            onClick={() => setSelectedTaskId(t.id)}
                             style={{
-                                flex: `0 0 ${colWidths.id}`,
-                                overflow: "hidden",
-                                textOverflow: "ellipsis",
-                                whiteSpace: "nowrap",
-                                borderRight: "1px solid #ddd",
-                                padding: "0 8px",
+                                display: "flex",
+                                alignItems: "center",
+                                height: ganttDimensions.rowHeight,          // ✅ match Gantt rowHeight
+                                lineHeight: `${ganttDimensions.rowHeight}px`,
+                                cursor: "pointer",
+                                borderBottom: "1px solid #ddd",
+                                background: isSelected ? "rgba(0,0,0,0.04)" : undefined,
+                                boxSizing: "border-box",                    // ✅ keeps border inside height
                             }}
                         >
-                            {projectId}
+                            <div
+                                style={{
+                                    flex: `0 0 ${colWidths.id}`,
+                                    borderRight: "1px solid #ddd",
+                                    padding: "0 4px",
+                                    display: "flex",
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                    gap: "4px",
+                                    overflow: "hidden",
+                                    textOverflow: "ellipsis",
+                                    whiteSpace: "nowrap",
+                                }}
+                            >
+                                {t.type === "task" && (t as any).spIndex ? (
+                                    <>
+                                        <span>{t.project}</span>
+                                        <span
+                                            style={{
+                                                backgroundColor: "#ff5722",
+                                                color: "#fff",
+                                                fontSize: "10px",
+                                                fontWeight: "bold",
+                                                width: "18px",
+                                                height: "18px",
+                                                borderRadius: "50%",          // ✅ makes it a circle
+                                                display: "flex",
+                                                alignItems: "center",
+                                                justifyContent: "center",
+                                            }}
+
+                                        >
+                                            S{(t as any).spIndex}
+                                        </span>
+                                    </>
+                                ) : (
+                                    <span>{t.id}</span>
+                                )}
+                            </div>
+
+                            <div
+                                style={{
+                                    flex: `0 0 ${colWidths.pm}`,
+                                    overflow: "hidden",
+                                    textOverflow: "ellipsis",
+                                    whiteSpace: "nowrap",
+                                    borderRight: "1px solid #ddd",
+                                    padding: "0 4px",
+                                    textAlign: "center",
+                                }}
+                            >
+                                {manager}
+                            </div>
+                            <div
+                                style={{
+                                    flex: `0 0 ${colWidths.sd}`,
+                                    borderRight: "1px solid #ddd",
+                                    padding: "0 4px",
+                                    textAlign: "center",
+                                }}
+                            >
+                                {startStr}
+                            </div>
+                            <div
+                                style={{
+                                    flex: `0 0 ${colWidths.eed}`,
+                                    padding: "0 4px",
+                                    textAlign: "center",
+                                }}
+                            >
+                                {endStr}
+                            </div>
                         </div>
-                        <div
-                            style={{
-                                flex: `0 0 ${colWidths.pm}`,
-                                overflow: "hidden",
-                                textOverflow: "ellipsis",
-                                whiteSpace: "nowrap",
-                                borderRight: "1px solid #ddd",
-                                padding: "0 8px",
-                            }}
-                        >
-                            {manager}
-                        </div>
-                        <div
-                            style={{
-                                flex: `0 0 ${colWidths.sd}`,
-                                borderRight: "1px solid #ddd",
-                                padding: "0 8px",
-                            }}
-                        >
-                            {startStr}
-                        </div>
-                        <div
-                            style={{
-                                flex: `0 0 ${colWidths.eed}`,
-                                padding: "0 8px",
-                            }}
-                        >
-                            {endStr}
-                        </div>
-                    </div>
-                );
-            })}
-        </div>
-    );
+                    );
+                })}
+            </div>
+        );
+    };
 
     useEffect(() => {
         fetch("http://localhost:5000/gantt-data")
@@ -338,24 +445,50 @@ const GanttChart: React.FC = () => {
         }
         setSelectedTask(backendTask);
     };
+    // Calculate responsive Gantt chart dimensions
+    const getGanttDimensions = () => {
+        if (isExtraSmallScreen) {
+            return {
+                columnWidth: 60,
+                rowHeight: 28,
+                listCellWidth: "320px",
+                fontSize: "12px"
+            };
+        } else if (isSmallScreen) {
+            return {
+                columnWidth: 70,
+                rowHeight: 30,
+                listCellWidth: "380px",
+                fontSize: "13px"
+            };
+        }
+        return {
+            columnWidth: 80,
+            rowHeight: 32,
+            listCellWidth: "440px",
+            fontSize: "14px"
+        };
+    };
+
+    const ganttDimensions = getGanttDimensions();
 
     return (
-        <>
+        <Box sx={{ p: { xs: 1, sm: 2, md: 3 }, height: '100vh', display: 'flex', flexDirection: 'column' }}>
             {/* Filter / Controls */}
             <Box
                 sx={{
-                    mb: 3,
+                    mb: 2,
                     display: "flex",
                     flexWrap: "wrap",
-                    gap: 2,
+                    gap: { xs: 1, sm: 2 },
                     alignItems: "center",
                 }}
             >
-                <Typography variant="h6" sx={{ flexBasis: "100%" }}>
+                <Typography variant="h6" sx={{ flexBasis: "100%", fontSize: { xs: '1.1rem', sm: '1.25rem' } }}>
                     Project Timeline
                 </Typography>
 
-                <FormControl sx={{ minWidth: 150 }}>
+                <FormControl sx={{ minWidth: { xs: 120, sm: 140, md: 150 } }} size={isExtraSmallScreen ? "small" : "medium"}>
                     <InputLabel>View Mode</InputLabel>
                     <Select
                         value={viewMode}
@@ -371,9 +504,11 @@ const GanttChart: React.FC = () => {
                 <TextField
                     label="Start Date"
                     type="date"
-
+                    InputLabelProps={{ shrink: true }}
                     value={filterStart}
                     onChange={(e) => setFilterStart(e.target.value)}
+                    size={isExtraSmallScreen ? "small" : "medium"}
+                    sx={{ width: { xs: 140, sm: 160 } }}
                 />
 
                 <TextField
@@ -382,6 +517,8 @@ const GanttChart: React.FC = () => {
                     InputLabelProps={{ shrink: true }}
                     value={filterEnd}
                     onChange={(e) => setFilterEnd(e.target.value)}
+                    size={isExtraSmallScreen ? "small" : "medium"}
+                    sx={{ width: { xs: 140, sm: 160 } }}
                 />
 
                 {(filterStart || filterEnd) && (
@@ -394,6 +531,7 @@ const GanttChart: React.FC = () => {
                             localStorage.removeItem("ganttFilterStart");
                             localStorage.removeItem("ganttFilterEnd");
                         }}
+                        size={isExtraSmallScreen ? "small" : "medium"}
                     >
                         Clear Dates
                     </Button>
@@ -401,70 +539,65 @@ const GanttChart: React.FC = () => {
             </Box>
 
             {/* Gantt Wrapper */}
-            <div
-                style={{
+            <Box
+                sx={{
                     flex: 1,
                     display: "flex",
                     flexDirection: "column",
                     minHeight: 0,
                     overflow: "hidden",
+                    border: "1px solid #e0e0e0",
+                    borderRadius: "4px",
                 }}
             >
-                {/* Top horizontal scrollbar */}
-                {/* <div
-          ref={topScrollRef}
-          style={{
-            overflowX: "auto",
-            overflowY: "hidden",
-            height: 16,
-            position: "sticky",
-            top: 0,
-            background: "#fff",
-            zIndex: 10,
-          }}
-          onScroll={(e) => {
-            if (bottomScrollRef.current)
-              bottomScrollRef.current.scrollLeft = (
-                e.target as HTMLDivElement
-              ).scrollLeft;
-          }}
-        >
-          <div
-            style={{
-              width: ganttContentRef.current?.scrollWidth || "100%",
-              height: "1px",
-            }}
-          />
-        </div> */}
                 {/* Main scrollable Gantt area */}
-                <div
+                <Box
                     ref={bottomScrollRef}
-                    style={{ flex: 1, overflow: "auto", minHeight: 0 }}
+                    sx={{
+                        flex: 1,
+                        overflow: "auto",
+                        minHeight: 0,
+                        fontFamily: '"Roboto", "Helvetica", "Arial", sans-serif',
+                        fontSize: ganttDimensions.fontSize
+                    }}
                     onScroll={(e) => {
-                        if (topScrollRef.current)
-                            topScrollRef.current.scrollLeft = (
-                                e.target as HTMLDivElement
-                            ).scrollLeft;
+                        if (topScrollRef.current) {
+                            topScrollRef.current.scrollLeft = (e.target as HTMLDivElement).scrollLeft;
+                        }
                     }}
                 >
-                    <div ref={ganttContentRef} className="gantt-dark">
+                    <Box
+                        ref={ganttContentRef}
+                        sx={{
+                            lineHeight: "normal",
+                        }}
+                    >
                         {filteredTasks.length > 0 ? (
                             <Gantt
-                                tasks={filteredTasks}
+                                tasks={addBoundaryTasks(filteredTasks)}
                                 viewMode={viewMode}
                                 onClick={handleTaskClick}
-                                columnWidth={80}
-                                rowHeight={32}
-                                listCellWidth="440px"
+                                columnWidth={ganttDimensions.columnWidth}
+                                rowHeight={ganttDimensions.rowHeight}
+                                listCellWidth="220"
                                 TaskListHeader={TaskListHeader}
                                 TaskListTable={TaskListTable}
+                                barFill={60}
+                                barCornerRadius={3}
+                                barProgressColor="#3366CC"
+                                barProgressSelectedColor="#3d7cef"
+                                barBackgroundColor="#a5b5d0"
+                                barBackgroundSelectedColor="#b8c6e4"
+                                fontFamily='"Roboto", "Helvetica", "Arial", sans-serif'
+                                fontSize={ganttDimensions.fontSize}
                             />
+
                         ) : (
-                            <p>No valid tasks to display...</p>
+                            <Typography sx={{ p: 2 }}>No valid tasks to display...</Typography>
                         )}
-                    </div>
-                </div>
-            </div>
+                    </Box>
+                </Box>
+            </Box>
 
             {/* Modal */}
             <Modal
@@ -482,11 +615,11 @@ const GanttChart: React.FC = () => {
                             left: "50%",
                             transform: "translate(-50%, -50%)",
                             bgcolor: "background.paper",
-                            borderRadius: 3,
+                            borderRadius: 2,
                             boxShadow: 6,
-                            p: 4,
-                            width: "90%",
-                            maxWidth: 700,
+                            p: { xs: 2, sm: 3, md: 4 },
+                            width: "95%",
+                            maxWidth: { xs: "95%", sm: "90%", md: 700 },
                             maxHeight: "85vh",
                             overflowY: "auto",
                         }}
@@ -494,96 +627,102 @@ const GanttChart: React.FC = () => {
                         {/* Header */}
                         <Box
                             sx={{
-                                mb: 3,
-                                p: 2,
+                                mb: 2,
+                                p: { xs: 1, sm: 2 },
                                 borderRadius: 2,
                                 background: "linear-gradient(135deg, #1976d2, #42a5f5)",
                                 color: "white",
                                 boxShadow: 2,
                             }}
                         >
-                            <Typography variant="h6" fontWeight="bold">
+                            <Typography variant="h6" fontWeight="bold" sx={{ fontSize: { xs: '1rem', sm: '1.1rem', md: '1.25rem' } }}>
                                 {selectedTask?.parent_name ? "Subproject Details" : "Project Details"}
                             </Typography>
                             {selectedTask?.parent_name && (
-                                <Typography variant="body2">
+                                <Typography variant="body2" sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}>
                                     Parent Project: <strong>{selectedTask.parent_name}</strong>
                                 </Typography>
                             )}
                         </Box>
-
                         {/* Project Info */}
-                        <Box sx={{ mb: 3 }}>
-                            <Typography><strong>Name:</strong> {selectedTask?.name}</Typography>
-                            <Typography>
+                        <Box sx={{ mb: 2 }}>
+                            <Typography sx={{ fontSize: { xs: '0.875rem', sm: '1rem' }, mb: 1 }}>
+                                <strong>Name:</strong> {selectedTask?.name}
+                            </Typography>
+                            <Typography sx={{ fontSize: { xs: '0.875rem', sm: '1rem' }, mb: 1 }}>
                                 <strong>Description:</strong>{" "}
                                 {selectedTask?.project_details ||
                                     selectedTask?.subproject_details ||
                                     "N/A"}
                             </Typography>
-                            <Typography>
+                            <Typography sx={{ fontSize: { xs: '0.875rem', sm: '1rem' }, mb: 1 }}>
                                 <strong>Status:</strong>{" "}
                                 {selectedTask?.urgency
                                     ? urgencyLabels[selectedTask.urgency]
                                     : "N/A"}
                             </Typography>
-                            <Typography>
+                            <Typography sx={{ fontSize: { xs: '0.875rem', sm: '1rem' }, mb: 1 }}>
                                 <strong>Start Date:</strong>{" "}
                                 {selectedTask?.start
                                     ? new Date(selectedTask.start).toDateString()
                                     : "N/A"}
                             </Typography>
-                            <Typography>
+                            <Typography sx={{ fontSize: { xs: '0.875rem', sm: '1rem' }, mb: 1 }}>
                                 <strong>Expected End Date:</strong>{" "}
                                 {selectedTask?.end
                                     ? new Date(selectedTask.end).toDateString()
                                     : "N/A"}
                             </Typography>
-                            <Typography><strong>Engineer:</strong> {selectedTask?.assign_to || "N/A"}</Typography>
-                            <Typography><strong>Project Manager:</strong> {selectedTask?.project_manager || "N/A"}</Typography>
-                            <Typography><strong>Team:</strong> {selectedTask?.p_team || "N/A"}</Typography>
+                            <Typography sx={{ fontSize: { xs: '0.875rem', sm: '1rem' }, mb: 1 }}>
+                                <strong>Engineer:</strong> {selectedTask?.assign_to || "N/A"}
+                            </Typography>
+                            <Typography sx={{ fontSize: { xs: '0.875rem', sm: '1rem' }, mb: 1 }}>
+                                <strong>Project Manager:</strong> {selectedTask?.project_manager || "N/A"}
+                            </Typography>
+                            <Typography sx={{ fontSize: { xs: '0.875rem', sm: '1rem' }, mb: 1 }}>
+                                <strong>Team:</strong> {selectedTask?.p_team || "N/A"}
+                            </Typography>
                         </Box>
 
                         {/* Finance Table */}
                         {!selectedTask?.parent_name && (selectedTask?.invoices?.length ?? 0) > 0 && (
                             <>
-                                <Typography variant="subtitle1" fontWeight="bold" sx={{ mb: 2 }}>
+                                <Typography variant="subtitle1" fontWeight="bold" sx={{ mb: 1, fontSize: { xs: '0.9rem', sm: '1rem' } }}>
                                     Invoice Details
                                 </Typography>
-                                <Paper elevation={2} sx={{ mb: 3 }}>
+                                <Paper elevation={2} sx={{ mb: 2, overflow: 'auto' }}>
                                     <Table size="small">
                                         <TableHead sx={{ backgroundColor: "#f5f5f5" }}>
                                             <TableRow>
-                                                <TableCell><strong>Invoice Date</strong></TableCell>
-                                                <TableCell><strong>Service Date</strong></TableCell>
-                                                <TableCell><strong>Due Date</strong></TableCell>
-                                                <TableCell><strong>Status</strong></TableCell>
-                                                <TableCell align="right"><strong>Amount</strong></TableCell>
-                                                <TableCell><strong>Comment</strong></TableCell>
+                                                <TableCell sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}><strong>Invoice #</strong></TableCell>
+                                                <TableCell sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}><strong>Service #</strong></TableCell>
+                                                <TableCell sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}><strong>Due Date</strong></TableCell>
+                                                <TableCell sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}><strong>Status</strong></TableCell>
+                                                <TableCell align="right" sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}><strong>Amount</strong></TableCell>
+                                                <TableCell sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}><strong>Comment</strong></TableCell>
                                             </TableRow>
                                         </TableHead>
                                         <TableBody>
                                             {selectedTask!.invoices!.map((inv: Invoice, idx: number) => (
                                                 <TableRow key={idx}>
-                                                    <TableCell>{inv.invoice_number || "N/A"}</TableCell>
-                                                    <TableCell>{inv.service_number || "N/A"}</TableCell>
-                                                    <TableCell>
+                                                    <TableCell sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}>{inv.invoice_number || "N/A"}</TableCell>
+                                                    <TableCell sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}>{inv.service_number || "N/A"}</TableCell>
+                                                    <TableCell sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}>
                                                         {inv.due_date
-                                                            ? new Date(inv.due_date).toDateString()
+                                                            ? new Date(inv.due_date).toLocaleDateString()
                                                             : "N/A"}
                                                     </TableCell>
-                                                    <TableCell>
+                                                    <TableCell sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}>
                                                         {inv.payment_status?.toLowerCase() === "paid"
-                                                            ? "Paid Projects"
+                                                            ? "Paid"
                                                             : inv.payment_status?.toLowerCase() === "void"
                                                                 ? "Invoiced"
                                                                 : inv.payment_status || "N/A"}
                                                     </TableCell>
-
-                                                    <TableCell align="right">
+                                                    <TableCell align="right" sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}>
                                                         {inv.amount ? `$${inv.amount}` : "N/A"}
                                                     </TableCell>
-                                                    <TableCell>{inv.comment || "N/A"}</TableCell>
+                                                    <TableCell sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}>{inv.comment || "N/A"}</TableCell>
                                                 </TableRow>
                                             ))}
                                         </TableBody>
@@ -591,13 +730,13 @@ const GanttChart: React.FC = () => {
                                 </Paper>
                             </>
                         )}
-
                         {/* Actions */}
                         <Box textAlign="right">
                             <Button
                                 variant="contained"
                                 onClick={() => setSelectedTask(null)}
                                 sx={{ borderRadius: 2 }}
+                                size={isExtraSmallScreen ? "small" : "medium"}
                             >
                                 Close
                             </Button>
@@ -605,10 +744,7 @@ const GanttChart: React.FC = () => {
                     </Box>
                 </Fade>
             </Modal>
-
-
-        </>
+        </Box>
     );
 };
-
 export default GanttChart;

@@ -80,7 +80,7 @@ def fetch_data():
     for p in projects:
         pid = int(p["project_id"])
         project_map[pid] = {
-            "id": f"P{pid}",
+            "id": pid,
             "name": p["project_name"],
             "start": to_iso(p["start_date"]),
             "end": to_iso(p["end_date"]),
