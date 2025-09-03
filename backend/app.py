@@ -44,7 +44,7 @@ def fetch_data():
         """
         SELECT 
             project_id, project_name, urgency, start_date, end_date, 
-            state, project_manager, project_details, p_team, assign_to
+            state, project_manager, project_details, p_team, assign_to ,reopen_status
         FROM projects
         """
     )
@@ -55,7 +55,7 @@ def fetch_data():
         """
         SELECT 
             project_id, subproject_name, urgency, start_date, sub_end_date, 
-            subproject_status, subproject_details, assign_to, p_team
+            subproject_status, subproject_details, assign_to, p_team, reopen_status
         FROM subprojects
         """
     )
@@ -90,8 +90,9 @@ def fetch_data():
             "project_details": p.get("project_details"),
             "p_team": p.get("p_team"),
             "assign_to": p.get("assign_to"),
+            "reopen_status": p.get("reopen_status"),
             "children": [],
-            "invoices": [],   # 🔹 Add invoices array
+            "invoices": [],  # 🔹 Add invoices array
         }
 
     # Attach subprojects
@@ -112,6 +113,7 @@ def fetch_data():
                         "subproject_details": sp.get("subproject_details"),
                         "p_team": sp.get("p_team"),
                         "assign_to": sp.get("assign_to"),
+                        "reopen_status": sp.get("reopen_status"),
                     }
                 )
 
@@ -129,7 +131,6 @@ def fetch_data():
                     "comments": inv.get("comments"),
                 }
             )
-
     # ✅ Sort subprojects
     for pid, project in project_map.items():
         project["children"].sort(
@@ -138,8 +139,17 @@ def fetch_data():
             )
         )
 
-    return list(project_map.values())
+    # ✅ Sort parent projects by start date
+    projects_list = list(project_map.values())
+    projects_list.sort(
+        key=lambda p: (
+            datetime.fromisoformat(p["start"]) if p["start"] else datetime.max
+        )
+    )
 
+    return projects_list
+
+    return list(project_map.values())
 
 
 @app.route("/health")

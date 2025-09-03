@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Gantt, type Task, ViewMode } from "gantt-task-react";
+export interface CustomTask extends Task { reopen_status?: string | null;   spIndex?: number; }
 import "gantt-task-react/dist/index.css";
 import { Box, Typography, FormControl, InputLabel, Select, MenuItem, TextField, Button, Modal, Backdrop, Fade, Paper, Table, TableBody, TableCell, TableHead, TableRow, useTheme, useMediaQuery, } from "@mui/material";
 
@@ -29,6 +30,7 @@ interface BackendTask {
     parent_name: string | null;
     status?: string;
     invoices?: Invoice[];
+    reopen_status?: string | null;
 }
 
 const GanttChart: React.FC = () => {
@@ -40,8 +42,9 @@ const GanttChart: React.FC = () => {
     const bottomScrollRef = React.useRef<HTMLDivElement>(null);
     const ganttContentRef = React.useRef<HTMLDivElement>(null);
 
-    const [tasks, setTasks] = useState<Task[]>([]);
-    const [filteredTasks, setFilteredTasks] = useState<Task[]>([]);
+    const [tasks, setTasks] = useState<CustomTask[]>([]);
+    const [filteredTasks, setFilteredTasks] = useState<CustomTask[]>([]);
+
     const [selectedTask, setSelectedTask] = useState<BackendTask | null>(null);
     const [backendTasks, setBackendTasks] = useState<BackendTask[]>([]);
     const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
@@ -122,51 +125,55 @@ const GanttChart: React.FC = () => {
             backgroundColor: color,
         };
     };
-    const addBoundaryTasks = (tasks: Task[]): Task[] => {
+    const addBoundaryTasks = (tasks: CustomTask[]): CustomTask[] => {
         if (tasks.length === 0) return tasks;
+
         const minStart = new Date(Math.min(...tasks.map(t => t.start.getTime())));
         const maxEnd = new Date(Math.max(...tasks.map(t => t.end.getTime())));
-        // Create a buffer period (e.g., 5% of total timeline)
+
         const totalDuration = maxEnd.getTime() - minStart.getTime();
-        const bufferDuration = totalDuration * 0.05; // 5% buffer
+        const bufferDuration = totalDuration * 0.05;
         const bufferStart = new Date(minStart.getTime() - bufferDuration);
         const bufferEnd = new Date(maxEnd.getTime() + bufferDuration);
-        // Use task types that will actually expand the timeline
-        const boundaryTasks: Task[] = [
+
+        const boundaryTasks: CustomTask[] = [
             {
                 id: "boundary-start",
                 name: "",
                 start: bufferStart,
-                end: new Date(bufferStart.getTime() + 1), // Ensure duration > 0
+                end: new Date(bufferStart.getTime() + 1),
                 type: "task",
                 progress: 0,
                 isDisabled: true,
                 hideChildren: true,
-                styles: { progressColor: "transparent", backgroundColor: "transparent" }
+                styles: { progressColor: "transparent", backgroundColor: "transparent" },
             },
             {
                 id: "boundary-end",
                 name: "",
-                start: new Date(bufferEnd.getTime() - 1), // Ensure duration > 0
+                start: new Date(bufferEnd.getTime() - 1),
                 end: bufferEnd,
                 type: "task",
                 progress: 0,
                 isDisabled: true,
                 hideChildren: true,
-                styles: { progressColor: "transparent", backgroundColor: "transparent" }
+                styles: { progressColor: "transparent", backgroundColor: "transparent" },
             },
         ];
 
         return [...tasks, ...boundaryTasks];
     };
-    const mapOneParent = (item: BackendTask): Task[] => {
+
+    const mapOneParent = (item: BackendTask): CustomTask[] => {
         if (!item.start || !item.end) return [];
 
-        const startDate = new Date(item.start);
-        const endDate = new Date(item.end);
+        let startDate = new Date(item.start);
+        let endDate = new Date(item.end);
+        if (endDate < startDate) [startDate, endDate] = [endDate, startDate];
+
         const parentColor = urgencyColors[item.urgency || "gray"] || "#bfbfbf";
 
-        const parent: Task = {
+        const parent: CustomTask = {
             id: item.id,
             name: item.name,
             start: startDate,
@@ -175,17 +182,20 @@ const GanttChart: React.FC = () => {
             progress: 0,
             isDisabled: false,
             styles: styleWithBorderFix(parentColor),
+            reopen_status: item.reopen_status ?? null,   // ✅ no "as any"
         };
 
-        const children: Task[] = (item.children || [])
+        const children: CustomTask[] = (item.children || [])
             .map((child, index) => {
                 if (!child.start || !child.end) return null;
-                const cStart = new Date(child.start);
-                const cEnd = new Date(child.end);
-                const childColor =
-                    urgencyColors[child.urgency || "gray"] || "#bfbfbf";
 
-                return {
+                let cStart = new Date(child.start);
+                let cEnd = new Date(child.end);
+                if (cEnd < cStart) [cStart, cEnd] = [cEnd, cStart];
+
+                const childColor = urgencyColors[child.urgency || "gray"] || "#bfbfbf";
+
+                const ct: CustomTask = {
                     id: child.id,
                     name: `→ ${child.name}`,
                     start: cStart,
@@ -196,12 +206,16 @@ const GanttChart: React.FC = () => {
                     isDisabled: false,
                     styles: styleWithBorderFix(childColor),
                     spIndex: index + 1,
-                } as Task & { spIndex?: number };
+                    reopen_status: child.reopen_status ?? null,
+                };
+                return ct;
             })
-            .filter((c): c is Task & { spIndex?: number } => c !== null);
+            .filter((c): c is CustomTask => c !== null);
 
         return [parent, ...children];
     };
+
+
     const TaskListHeader: React.FC<any> = ({
         headerHeight,
         rowWidth,
@@ -318,8 +332,8 @@ const GanttChart: React.FC = () => {
                                     padding: "0 4px",
                                     display: "flex",
                                     alignItems: "center",
-                                    justifyContent: "center",
-                                    gap: "4px",
+                                    justifyContent: "left",
+                                    gap: "6px",   // space between id and badges
                                     overflow: "hidden",
                                     textOverflow: "ellipsis",
                                     whiteSpace: "nowrap",
@@ -328,6 +342,8 @@ const GanttChart: React.FC = () => {
                                 {t.type === "task" && (t as any).spIndex ? (
                                     <>
                                         <span>{t.project}</span>
+
+                                        {/* 🔹 Subproject badge */}
                                         <span
                                             style={{
                                                 backgroundColor: "#ff5722",
@@ -336,20 +352,64 @@ const GanttChart: React.FC = () => {
                                                 fontWeight: "bold",
                                                 width: "18px",
                                                 height: "18px",
-                                                borderRadius: "50%",          // ✅ makes it a circle
+                                                borderRadius: "50%",
                                                 display: "flex",
                                                 alignItems: "center",
                                                 justifyContent: "center",
                                             }}
-
                                         >
                                             S{(t as any).spIndex}
                                         </span>
+
+                                        {/* 🔹 Reopen badge (if exists) */}
+                                        {(t as any).reopen_status ? (
+                                            <span
+                                                style={{
+                                                    backgroundColor: "#ff5722",
+                                                    color: "#fff",
+                                                    fontSize: "10px",
+                                                    fontWeight: "bold",
+                                                    width: "18px",
+                                                    height: "18px",
+                                                    borderRadius: "50%",
+                                                    display: "flex",
+                                                    alignItems: "center",
+                                                    justifyContent: "center",
+                                                }}
+                                            >
+                                                {(t as any).reopen_status}
+                                            </span>
+                                        ) : null}
                                     </>
                                 ) : (
-                                    <span>{t.id}</span>
+                                    <>
+                                        <span>{t.id}</span>
+
+                                        {/* 🔹 Reopen badge for normal projects */}
+                                        {(t as any).reopen_status ? (
+                                            <span
+                                                style={{
+                                                    backgroundColor: "#ff5722",
+                                                    color: "#fff",
+                                                    fontSize: "10px",
+                                                    fontWeight: "bold",
+                                                    width: "18px",
+                                                    height: "18px",
+                                                    borderRadius: "50%",
+                                                    display: "flex",
+                                                    alignItems: "center",
+                                                    justifyContent: "center",
+                                                }}
+                                            >
+                                                {(t as any).reopen_status}
+                                            </span>
+                                        ) : null}
+                                    </>
                                 )}
                             </div>
+
+
+
 
                             <div
                                 style={{
