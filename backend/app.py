@@ -25,13 +25,23 @@ def to_iso(d):
         return datetime(d.year, d.month, d.day).isoformat()
 
     if isinstance(d, str):
-        for fmt in ("%Y-%m-%d", "%Y-%m-%d %H:%M:%S"):
+        for fmt in ("%Y-%m-%d", "%Y-%m-%d %H:%M:%S", "%a, %d %b %Y %H:%M:%S %Z"):
             try:
                 return datetime.strptime(d, fmt).isoformat()
             except ValueError:
                 pass
         return None
 
+    return None
+
+
+def clean_date(d):
+    if not d:
+        return None
+
+    iso = to_iso(d)
+    if iso:
+        return iso.split("T")[0]  # ✅ keep only YYYY-MM-DD
     return None
 
 
@@ -44,7 +54,7 @@ def fetch_data():
         """
         SELECT 
             project_id, project_name, urgency, start_date, end_date, 
-            state, project_manager, project_details, p_team, assign_to ,reopen_status
+            state, project_manager, project_details, p_team, assign_to, reopen_status
         FROM projects
         """
     )
@@ -61,16 +71,27 @@ def fetch_data():
     )
     subprojects = cursor.fetchall()
 
-    # Fetch invoices (new)
+    # Fetch invoices
     cursor.execute(
         """
         SELECT 
             project_id, invoice_number, service_date, due_date, 
             payment_status, amount, comments
-        FROM csa_finance_invoiced 
+        FROM csa_finance_invoiced
         """
     )
     invoices = cursor.fetchall()
+
+    # Fetch "ready to be invoiced"
+    cursor.execute(
+        """
+        SELECT 
+            project_id, invoice_number, service_date, due_date, 
+            project_status, price, comments
+        FROM csa_finance_readytobeinvoiced
+        """
+    )
+    ready_invoices = cursor.fetchall()
 
     cursor.close()
     conn.close()
@@ -92,7 +113,7 @@ def fetch_data():
             "assign_to": p.get("assign_to"),
             "reopen_status": p.get("reopen_status"),
             "children": [],
-            "invoices": [],  # 🔹 Add invoices array
+            "invoices": [],
         }
 
     # Attach subprojects
@@ -117,21 +138,48 @@ def fetch_data():
                     }
                 )
 
-    # ✅ Attach invoices to projects
+    # ✅ Attach invoices
     for inv in invoices:
         pid = int(inv["project_id"])
         if pid in project_map:
+            payment_status = inv.get("payment_status")
+            if not payment_status or str(payment_status).strip() == "":
+                payment_status = "not paid"
+
             project_map[pid]["invoices"].append(
                 {
                     "invoice_number": inv.get("invoice_number"),
-                    "service_date": inv.get("service_date"),
-                    "due_date": to_iso(inv.get("due_date")),
-                    "payment_status": inv.get("payment_status"),
+                    "service_date": clean_date(inv.get("service_date")),
+                    "due_date": clean_date(inv.get("due_date")),
+                    "payment_status": payment_status,
                     "amount": inv.get("amount"),
                     "comments": inv.get("comments"),
                 }
             )
-    # ✅ Sort subprojects
+
+    # ✅ Attach "ready to be invoiced"
+    for r in ready_invoices:
+        pid = int(r["project_id"])
+        if pid in project_map:
+            status = r.get("project_status")
+            if not status or str(status).strip() == "":
+                status = "ready to be invoiced"
+
+            if str(status).lower() == "invoiced":
+                continue
+
+            project_map[pid].setdefault("ready_to_invoice", []).append(
+                {
+                    "invoice_number": r.get("invoice_number"),
+                    "service_date": clean_date(r.get("service_date")),
+                    "due_date": clean_date(r.get("due_date")),
+                    "project_status": status,
+                    "price": r.get("price"),
+                    "comments": r.get("comments"),
+                }
+            )
+
+    # ✅ Sort subprojects by status
     for pid, project in project_map.items():
         project["children"].sort(
             key=lambda x: (
@@ -148,8 +196,6 @@ def fetch_data():
     )
 
     return projects_list
-
-    return list(project_map.values())
 
 
 @app.route("/health")

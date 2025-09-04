@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Gantt, type Task, ViewMode } from "gantt-task-react";
-export interface CustomTask extends Task { reopen_status?: string | null;   spIndex?: number; }
+export interface CustomTask extends Task { reopen_status?: string | null; spIndex?: number; }
 import "gantt-task-react/dist/index.css";
 import { Box, Typography, FormControl, InputLabel, Select, MenuItem, TextField, Button, Modal, Backdrop, Fade, Paper, Table, TableBody, TableCell, TableHead, TableRow, useTheme, useMediaQuery, } from "@mui/material";
 
@@ -12,6 +12,15 @@ interface Invoice {
     amount: number;
     comment: string;
 }
+interface ReadyToInvoice {
+    invoice_number?: string;
+    service_date?: string;
+    due_date?: string;
+    project_status?: string;
+    price?: number;
+    comments?: string;
+}
+
 
 interface BackendTask {
     assign_to: string;
@@ -30,6 +39,7 @@ interface BackendTask {
     parent_name: string | null;
     status?: string;
     invoices?: Invoice[];
+    ready_to_invoice?: ReadyToInvoice[];   // ✅ added
     reopen_status?: string | null;
 }
 
@@ -37,27 +47,17 @@ const GanttChart: React.FC = () => {
     const theme = useTheme();
     const isSmallScreen = useMediaQuery(theme.breakpoints.down('md'));
     const isExtraSmallScreen = useMediaQuery(theme.breakpoints.down('sm'));
-
     const topScrollRef = React.useRef<HTMLDivElement>(null);
     const bottomScrollRef = React.useRef<HTMLDivElement>(null);
     const ganttContentRef = React.useRef<HTMLDivElement>(null);
-
     const [tasks, setTasks] = useState<CustomTask[]>([]);
     const [filteredTasks, setFilteredTasks] = useState<CustomTask[]>([]);
-
     const [selectedTask, setSelectedTask] = useState<BackendTask | null>(null);
     const [backendTasks, setBackendTasks] = useState<BackendTask[]>([]);
     const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
-
-    const [viewMode, setViewMode] = useState<ViewMode>(
-        (localStorage.getItem("ganttViewMode") as ViewMode) || ViewMode.Month
-    );
-    const [filterStart, setFilterStart] = useState<string>(
-        localStorage.getItem("ganttFilterStart") || ""
-    );
-    const [filterEnd, setFilterEnd] = useState<string>(
-        localStorage.getItem("ganttFilterEnd") || ""
-    );
+    const [viewMode, setViewMode] = useState<ViewMode>((localStorage.getItem("ganttViewMode") as ViewMode) || ViewMode.Month);
+    const [filterStart, setFilterStart] = useState<string>(localStorage.getItem("ganttFilterStart") || "");
+    const [filterEnd, setFilterEnd] = useState<string>(localStorage.getItem("ganttFilterEnd") || "");
 
     const urgencyLabels: Record<string, string> = {
         red: "Very Urgent",
@@ -104,14 +104,12 @@ const GanttChart: React.FC = () => {
             eed: "120px",
         };
     };
-
     const colWidths = getColWidths();
     // helper to detect near-white colors
     const isNearWhite = (color: string) => {
         const hex = color.replace("#", "").toLowerCase();
         return ["ffffff", "fefefe", "fefdfd"].includes(hex);
     };
-
     const styleWithBorderFix = (color: string) => {
         if (isNearWhite(color)) {
             return {
@@ -127,15 +125,12 @@ const GanttChart: React.FC = () => {
     };
     const addBoundaryTasks = (tasks: CustomTask[]): CustomTask[] => {
         if (tasks.length === 0) return tasks;
-
         const minStart = new Date(Math.min(...tasks.map(t => t.start.getTime())));
         const maxEnd = new Date(Math.max(...tasks.map(t => t.end.getTime())));
-
         const totalDuration = maxEnd.getTime() - minStart.getTime();
         const bufferDuration = totalDuration * 0.05;
         const bufferStart = new Date(minStart.getTime() - bufferDuration);
         const bufferEnd = new Date(maxEnd.getTime() + bufferDuration);
-
         const boundaryTasks: CustomTask[] = [
             {
                 id: "boundary-start",
@@ -163,16 +158,13 @@ const GanttChart: React.FC = () => {
 
         return [...tasks, ...boundaryTasks];
     };
-
     const mapOneParent = (item: BackendTask): CustomTask[] => {
         if (!item.start || !item.end) return [];
 
         let startDate = new Date(item.start);
         let endDate = new Date(item.end);
         if (endDate < startDate) [startDate, endDate] = [endDate, startDate];
-
         const parentColor = urgencyColors[item.urgency || "gray"] || "#bfbfbf";
-
         const parent: CustomTask = {
             id: item.id,
             name: item.name,
@@ -214,8 +206,6 @@ const GanttChart: React.FC = () => {
 
         return [parent, ...children];
     };
-
-
     const TaskListHeader: React.FC<any> = ({
         headerHeight,
         rowWidth,
@@ -280,7 +270,6 @@ const GanttChart: React.FC = () => {
             </div>
         );
     };
-
     const TaskListTable: React.FC<any> = ({
         rowWidth,
         fontFamily,
@@ -384,7 +373,6 @@ const GanttChart: React.FC = () => {
                                 ) : (
                                     <>
                                         <span>{t.id}</span>
-
                                         {/* 🔹 Reopen badge for normal projects */}
                                         {(t as any).reopen_status ? (
                                             <span
@@ -407,10 +395,6 @@ const GanttChart: React.FC = () => {
                                     </>
                                 )}
                             </div>
-
-
-
-
                             <div
                                 style={{
                                     flex: `0 0 ${colWidths.pm}`,
@@ -449,7 +433,6 @@ const GanttChart: React.FC = () => {
             </div>
         );
     };
-
     useEffect(() => {
         fetch("http://localhost:5000/gantt-data")
             .then((res) => res.json())
@@ -461,7 +444,6 @@ const GanttChart: React.FC = () => {
             })
             .catch((err) => console.error("Error fetching data:", err));
     }, []);
-
     useEffect(() => {
         let filtered = [...tasks];
         if (filterStart) {
@@ -745,51 +727,84 @@ const GanttChart: React.FC = () => {
                         </Box>
 
                         {/* Finance Table */}
-                        {!selectedTask?.parent_name && (selectedTask?.invoices?.length ?? 0) > 0 && (
-                            <>
-                                <Typography variant="subtitle1" fontWeight="bold" sx={{ mb: 1, fontSize: { xs: '0.9rem', sm: '1rem' } }}>
-                                    Invoice Details
-                                </Typography>
-                                <Paper elevation={2} sx={{ mb: 2, overflow: 'auto' }}>
-                                    <Table size="small">
-                                        <TableHead sx={{ backgroundColor: "#f5f5f5" }}>
-                                            <TableRow>
-                                                <TableCell sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}><strong>Invoice #</strong></TableCell>
-                                                <TableCell sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}><strong>Service #</strong></TableCell>
-                                                <TableCell sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}><strong>Due Date</strong></TableCell>
-                                                <TableCell sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}><strong>Status</strong></TableCell>
-                                                <TableCell align="right" sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}><strong>Amount</strong></TableCell>
-                                                <TableCell sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}><strong>Comment</strong></TableCell>
-                                            </TableRow>
-                                        </TableHead>
-                                        <TableBody>
-                                            {selectedTask!.invoices!.map((inv: Invoice, idx: number) => (
-                                                <TableRow key={idx}>
-                                                    <TableCell sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}>{inv.invoice_number || "N/A"}</TableCell>
-                                                    <TableCell sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}>{inv.service_number || "N/A"}</TableCell>
+                        {!selectedTask?.parent_name &&
+                            ((selectedTask?.invoices?.length ?? 0) > 0 || (selectedTask?.ready_to_invoice?.length ?? 0) > 0) && (
+                                <>
+                                    <Typography
+                                        variant="subtitle1"
+                                        fontWeight="bold"
+                                        sx={{ mb: 1, fontSize: { xs: '0.9rem', sm: '1rem' } }}
+                                    >
+                                        Receivable Details
+                                    </Typography>
+                                    <Paper elevation={2} sx={{ mb: 2, overflow: 'auto' }}>
+                                        <Table size="small">
+                                            <TableHead sx={{ backgroundColor: "#f5f5f5" }}>
+                                                <TableRow>
                                                     <TableCell sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}>
-                                                        {inv.due_date
-                                                            ? new Date(inv.due_date).toLocaleDateString()
-                                                            : "N/A"}
+                                                        <strong>Invoice</strong>
                                                     </TableCell>
                                                     <TableCell sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}>
-                                                        {inv.payment_status?.toLowerCase() === "paid"
-                                                            ? "Paid"
-                                                            : inv.payment_status?.toLowerCase() === "void"
-                                                                ? "Invoiced"
-                                                                : inv.payment_status || "N/A"}
+                                                        <strong>Service Date</strong>
+                                                    </TableCell>
+                                                    <TableCell sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}>
+                                                        <strong>Due Date</strong>
+                                                    </TableCell>
+                                                    <TableCell sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}>
+                                                        <strong>Status</strong>
                                                     </TableCell>
                                                     <TableCell align="right" sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}>
-                                                        {inv.amount ? `$${inv.amount}` : "N/A"}
+                                                        <strong>Amount</strong>
                                                     </TableCell>
-                                                    <TableCell sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}>{inv.comment || "N/A"}</TableCell>
+                                                    <TableCell sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}>
+                                                        <strong>Comments</strong>
+                                                    </TableCell>
                                                 </TableRow>
-                                            ))}
-                                        </TableBody>
-                                    </Table>
-                                </Paper>
-                            </>
-                        )}
+                                            </TableHead>
+                                            <TableBody>
+                                                {[...(selectedTask?.invoices ?? []), ...(selectedTask?.ready_to_invoice ?? [])]
+                                                    .map((inv: any, idx: number) => (
+                                                        <TableRow key={idx}>
+                                                            <TableCell sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}>
+                                                                {inv.invoice_number || "N/A"}
+                                                            </TableCell>
+                                                            <TableCell sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}>
+                                                                {inv.service_date || "N/A"}
+                                                            </TableCell>
+                                                            <TableCell sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}>
+                                                                {inv.due_date
+                                                                    ? new Date(inv.due_date).toLocaleDateString()
+                                                                    : "N/A"}
+                                                            </TableCell>
+                                                            <TableCell sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}>
+                                                                {/* If it has payment_status → invoice, else → ready_to_invoice */}
+                                                                {inv.payment_status
+                                                                    ? (inv.payment_status.toLowerCase() === "paid"
+                                                                        ? "Paid"
+                                                                        : inv.payment_status.toLowerCase() === "void"
+                                                                            ? "Invoiced"
+                                                                            : inv.payment_status)
+                                                                    : inv.project_status || "Ready to be Invoiced"}
+                                                            </TableCell>
+                                                            <TableCell align="right" sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}>
+                                                                {inv.amount
+                                                                    ? `$${inv.amount}`
+                                                                    : inv.price
+                                                                        ? `$${inv.price}`
+                                                                        : "N/A"}
+                                                            </TableCell>
+                                                            <TableCell sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}>
+                                                                {inv.comments || "N/A"}
+                                                            </TableCell>
+                                                        </TableRow>
+                                                    ))}
+                                            </TableBody>
+                                        </Table>
+                                    </Paper>
+                                </>
+                            )}
+
+
                         {/* Actions */}
                         <Box textAlign="right">
                             <Button
