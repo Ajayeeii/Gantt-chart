@@ -93,6 +93,17 @@ def fetch_data():
     )
     ready_invoices = cursor.fetchall()
 
+    # ✅ Fetch unpaid invoices
+    cursor.execute(
+        """
+        SELECT 
+            project_id, invoice_no, comments, invoice_date, booked_date, 
+            received_date, amount
+        FROM unpaidinvoices
+        """
+    )
+    unpaid_invoices = cursor.fetchall()
+
     cursor.close()
     conn.close()
 
@@ -114,6 +125,7 @@ def fetch_data():
             "reopen_status": p.get("reopen_status"),
             "children": [],
             "invoices": [],
+            "ready_to_invoice": [],
         }
 
     # Attach subprojects
@@ -176,6 +188,21 @@ def fetch_data():
                     "project_status": status,
                     "price": r.get("price"),
                     "comments": r.get("comments"),
+                }
+            )
+
+    # ✅ Attach unpaid invoices only if present
+    for u in unpaid_invoices:
+        pid = int(u["project_id"])
+        if pid in project_map:
+            project_map[pid].setdefault("unpaid_invoices", []).append(
+                {
+                    "invoice_no": u.get("invoice_no"),
+                    "comments": u.get("comments"),
+                    "invoice_date": clean_date(u.get("invoice_date")),
+                    "booked_date": clean_date(u.get("booked_date")),
+                    "received_date": clean_date(u.get("received_date")),
+                    "amount": u.get("amount"),
                 }
             )
 

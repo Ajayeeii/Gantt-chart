@@ -1,8 +1,38 @@
 import React, { useEffect, useState } from "react";
 import { Gantt, type Task, ViewMode } from "gantt-task-react";
-export interface CustomTask extends Task { reopen_status?: string | null; spIndex?: number; }
 import "gantt-task-react/dist/index.css";
-import { Box, Typography, FormControl, InputLabel, Select, MenuItem, TextField, Button, Modal, Backdrop, Fade, Paper, Table, TableBody, TableCell, TableHead, TableRow, useTheme, useMediaQuery, } from "@mui/material";
+
+export interface CustomTask extends Task {
+  reopen_status?: string | null;
+  spIndex?: number;
+}
+
+import {
+  Box,
+  Typography,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
+  TextField,
+  Button,
+  Modal,
+  Backdrop,
+  Fade,
+  Paper,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableRow,
+  InputAdornment,
+  useTheme,       // ✅ add this
+  useMediaQuery,  // ✅ add this
+} from "@mui/material";
+
+import CircularProgress from "@mui/material/CircularProgress";
+import SearchIcon from "@mui/icons-material/Search";
+
 
 interface Invoice {
     invoice_number: string;
@@ -20,7 +50,14 @@ interface ReadyToInvoice {
     price?: number;
     comments?: string;
 }
-
+interface UnpaidInvoice {
+    invoice_no: string;
+    comments?: string;
+    invoice_date?: string;
+    booked_date?: string;
+    received_date?: string;
+    amount?: number;
+}
 
 interface BackendTask {
     assign_to: string;
@@ -39,7 +76,8 @@ interface BackendTask {
     parent_name: string | null;
     status?: string;
     invoices?: Invoice[];
-    ready_to_invoice?: ReadyToInvoice[];   // ✅ added
+    ready_to_invoice?: ReadyToInvoice[];
+    unpaid_invoices?: UnpaidInvoice[];
     reopen_status?: string | null;
 }
 
@@ -58,7 +96,9 @@ const GanttChart: React.FC = () => {
     const [viewMode, setViewMode] = useState<ViewMode>((localStorage.getItem("ganttViewMode") as ViewMode) || ViewMode.Month);
     const [filterStart, setFilterStart] = useState<string>(localStorage.getItem("ganttFilterStart") || "");
     const [filterEnd, setFilterEnd] = useState<string>(localStorage.getItem("ganttFilterEnd") || "");
-
+    const [searchTerm, setSearchTerm] = useState<string>(localStorage.getItem("ganttSearchTerm") || "");
+    const [loading, setLoading] = useState(false);
+    const [pendingSearch, setPendingSearch] = useState("");
     const urgencyLabels: Record<string, string> = {
         red: "Very Urgent",
         navy: "Completed",
@@ -123,41 +163,7 @@ const GanttChart: React.FC = () => {
             backgroundColor: color,
         };
     };
-    const addBoundaryTasks = (tasks: CustomTask[]): CustomTask[] => {
-        if (tasks.length === 0) return tasks;
-        const minStart = new Date(Math.min(...tasks.map(t => t.start.getTime())));
-        const maxEnd = new Date(Math.max(...tasks.map(t => t.end.getTime())));
-        const totalDuration = maxEnd.getTime() - minStart.getTime();
-        const bufferDuration = totalDuration * 0.05;
-        const bufferStart = new Date(minStart.getTime() - bufferDuration);
-        const bufferEnd = new Date(maxEnd.getTime() + bufferDuration);
-        const boundaryTasks: CustomTask[] = [
-            {
-                id: "boundary-start",
-                name: "",
-                start: bufferStart,
-                end: new Date(bufferStart.getTime() + 1),
-                type: "task",
-                progress: 0,
-                isDisabled: true,
-                hideChildren: true,
-                styles: { progressColor: "transparent", backgroundColor: "transparent" },
-            },
-            {
-                id: "boundary-end",
-                name: "",
-                start: new Date(bufferEnd.getTime() - 1),
-                end: bufferEnd,
-                type: "task",
-                progress: 0,
-                isDisabled: true,
-                hideChildren: true,
-                styles: { progressColor: "transparent", backgroundColor: "transparent" },
-            },
-        ];
 
-        return [...tasks, ...boundaryTasks];
-    };
     const mapOneParent = (item: BackendTask): CustomTask[] => {
         if (!item.start || !item.end) return [];
 
@@ -434,6 +440,22 @@ const GanttChart: React.FC = () => {
         );
     };
     useEffect(() => {
+        localStorage.setItem("ganttSearchTerm", searchTerm);
+    }, [searchTerm]);
+    const clearSearch = () => {
+        setSearchTerm("");
+        localStorage.removeItem("ganttSearchTerm");
+    };
+    useEffect(() => {
+        const handler = setTimeout(() => {
+            setLoading(true);
+            setSearchTerm(pendingSearch);   // only update searchTerm after user stops typing
+            setLoading(false);
+        }, 500); // wait 500ms after typing stops
+
+        return () => clearTimeout(handler); // cleanup old timeout
+    }, [pendingSearch]);
+    useEffect(() => {
         fetch("http://localhost:5000/gantt-data")
             .then((res) => res.json())
             .then((data: BackendTask[]) => {
@@ -446,6 +468,24 @@ const GanttChart: React.FC = () => {
     }, []);
     useEffect(() => {
         let filtered = [...tasks];
+
+        // Apply search filter
+        if (searchTerm) {
+            const searchTermLower = searchTerm.toLowerCase();
+            filtered = filtered.filter(task => {
+                // Convert both IDs to strings and then lowercase for comparison
+                const taskIdStr = String(task.id).toLowerCase();
+                const projectIdStr = task.project ? String(task.project).toLowerCase() : "";
+
+                // Check if task ID or project ID matches search term
+                const matchesTaskId = taskIdStr.includes(searchTermLower);
+                const matchesProjectId = projectIdStr.includes(searchTermLower);
+
+                return matchesTaskId || matchesProjectId;
+            });
+        }
+
+        // Apply custom date filters if provided
         if (filterStart) {
             const startDate = new Date(filterStart);
             filtered = filtered.filter((t) => t.end >= startDate);
@@ -454,8 +494,9 @@ const GanttChart: React.FC = () => {
             const endDate = new Date(filterEnd);
             filtered = filtered.filter((t) => t.start <= endDate);
         }
+
         setFilteredTasks(filtered);
-    }, [filterStart, filterEnd, tasks]);
+    }, [searchTerm, filterStart, filterEnd, tasks]);
 
     useEffect(() => {
         localStorage.setItem("ganttViewMode", viewMode);
@@ -526,59 +567,131 @@ const GanttChart: React.FC = () => {
                     alignItems: "center",
                 }}
             >
-                <Typography variant="h6" sx={{ flexBasis: "100%", fontSize: { xs: '1.1rem', sm: '1.25rem' } }}>
+                <Typography
+                    variant="h6"
+                    sx={{ flexBasis: "100%", fontSize: { xs: '2.1rem', sm: '2.25rem' } }}
+                >
                     Project Timeline
                 </Typography>
 
-                <FormControl sx={{ minWidth: { xs: 120, sm: 140, md: 150 } }} size={isExtraSmallScreen ? "small" : "medium"}>
-                    <InputLabel>View Mode</InputLabel>
-                    <Select
-                        value={viewMode}
-                        label="View Mode"
-                        onChange={(e) => setViewMode(e.target.value as ViewMode)}
-                    >
-                        <MenuItem value={ViewMode.Day}>Day</MenuItem>
-                        <MenuItem value={ViewMode.Month}>Month</MenuItem>
-                        <MenuItem value={ViewMode.Year}>Year</MenuItem>
-                    </Select>
-                </FormControl>
+                {loading ? (
+                    <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                        <CircularProgress size={24} />
+                        <Typography variant="body2">Loading...</Typography>
+                    </Box>
+                ) : (
+                    <>
+                        <FormControl
+                            sx={{ minWidth: { xs: 120, sm: 140, md: 150 } }}
+                            size={isExtraSmallScreen ? "small" : "medium"}
+                        >
+                            <InputLabel>View Mode</InputLabel>
+                            <Select
+                                value={viewMode}
+                                label="View Mode"
+                                onChange={(e) => {
+                                    setLoading(true);
+                                    setViewMode(e.target.value as ViewMode);
+                                    setTimeout(() => setLoading(false), 500); // simulate delay
+                                }}
+                            >
+                                <MenuItem value={ViewMode.Day}>Day</MenuItem>
+                                <MenuItem value={ViewMode.Month}>Month</MenuItem>
+                                <MenuItem value={ViewMode.Year}>Year</MenuItem>
+                            </Select>
+                        </FormControl>
 
-                <TextField
-                    label="Start Date"
-                    type="date"
-                    InputLabelProps={{ shrink: true }}
-                    value={filterStart}
-                    onChange={(e) => setFilterStart(e.target.value)}
-                    size={isExtraSmallScreen ? "small" : "medium"}
-                    sx={{ width: { xs: 140, sm: 160 } }}
-                />
+                        <TextField
+                            label="Start Date"
+                            type="date"
+                            InputLabelProps={{ shrink: true }}
+                            value={filterStart}
+                            onChange={(e) => {
+                                setLoading(true);
+                                setFilterStart(e.target.value);
+                                setTimeout(() => setLoading(false), 500);
+                            }}
+                            size={isExtraSmallScreen ? "small" : "medium"}
+                            sx={{ width: { xs: 140, sm: 160 } }}
+                        />
 
-                <TextField
-                    label="End Date"
-                    type="date"
-                    InputLabelProps={{ shrink: true }}
-                    value={filterEnd}
-                    onChange={(e) => setFilterEnd(e.target.value)}
-                    size={isExtraSmallScreen ? "small" : "medium"}
-                    sx={{ width: { xs: 140, sm: 160 } }}
-                />
+                        <TextField
+                            label="End Date"
+                            type="date"
+                            InputLabelProps={{ shrink: true }}
+                            value={filterEnd}
+                            onChange={(e) => {
+                                setLoading(true);
+                                setFilterEnd(e.target.value);
+                                setTimeout(() => setLoading(false), 500);
+                            }}
+                            size={isExtraSmallScreen ? "small" : "medium"}
+                            sx={{ width: { xs: 140, sm: 160 } }}
+                        />
 
-                {(filterStart || filterEnd) && (
-                    <Button
-                        variant="outlined"
-                        color="secondary"
-                        onClick={() => {
-                            setFilterStart("");
-                            setFilterEnd("");
-                            localStorage.removeItem("ganttFilterStart");
-                            localStorage.removeItem("ganttFilterEnd");
-                        }}
-                        size={isExtraSmallScreen ? "small" : "medium"}
-                    >
-                        Clear Dates
-                    </Button>
+                        <TextField
+                            placeholder="Search ID"
+                            value={pendingSearch}
+                            onChange={(e) => setPendingSearch(e.target.value)}
+                            size={isExtraSmallScreen ? "small" : "medium"}
+                            sx={{
+                                width: { xs: 200, sm: 250 },
+                                backgroundColor: "#f5f5f5",
+                                borderRadius: "20px",
+                                "& .MuiOutlinedInput-root": {
+                                    borderRadius: "20px",
+                                },
+                                "& input::placeholder": {
+                                    fontSize: "0.9rem",
+                                },
+                            }}
+                            InputProps={{
+                                startAdornment: (
+                                    <InputAdornment position="start">
+                                        <SearchIcon />
+                                    </InputAdornment>
+                                ),
+                            }}
+                        />
+
+                        {searchTerm && (
+                            <Button
+                                variant="outlined"
+                                color="secondary"
+                                onClick={() => {
+                                    setLoading(true);
+                                    clearSearch();           // your existing function (resets searchTerm)
+                                    setPendingSearch("");    // also clear the input field
+                                    setTimeout(() => setLoading(false), 500);
+                                }}
+                                size={isExtraSmallScreen ? "small" : "medium"}
+                            >
+                                Clear Search
+                            </Button>
+
+                        )}
+
+                        {(filterStart || filterEnd) && !searchTerm && (
+                            <Button
+                                variant="outlined"
+                                color="secondary"
+                                onClick={() => {
+                                    setLoading(true);
+                                    setFilterStart("");
+                                    setFilterEnd("");
+                                    localStorage.removeItem("ganttFilterStart");
+                                    localStorage.removeItem("ganttFilterEnd");
+                                    setTimeout(() => setLoading(false), 500);
+                                }}
+                                size={isExtraSmallScreen ? "small" : "medium"}
+                            >
+                                Clear Dates
+                            </Button>
+                        )}
+                    </>
                 )}
             </Box>
+
 
             {/* Gantt Wrapper */}
             <Box
@@ -616,7 +729,7 @@ const GanttChart: React.FC = () => {
                     >
                         {filteredTasks.length > 0 ? (
                             <Gantt
-                                tasks={addBoundaryTasks(filteredTasks)}
+                                tasks={filteredTasks}  // ✅ This should be the correct prop name
                                 viewMode={viewMode}
                                 onClick={handleTaskClick}
                                 columnWidth={ganttDimensions.columnWidth}
@@ -803,6 +916,70 @@ const GanttChart: React.FC = () => {
                                     </Paper>
                                 </>
                             )}
+                        {/* Unpaid Invoices Table */}
+                        {!selectedTask?.parent_name &&
+                            (selectedTask?.unpaid_invoices?.length ?? 0) > 0 && (
+                                <>
+                                    <Typography
+                                        variant="subtitle1"
+                                        fontWeight="bold"
+                                        sx={{ mb: 1, fontSize: { xs: '0.9rem', sm: '1rem' } }}
+                                    >
+                                        Payable Details
+                                    </Typography>
+                                    <Paper elevation={2} sx={{ mb: 2, overflow: 'auto' }}>
+                                        <Table size="small">
+                                            <TableHead sx={{ backgroundColor: "#f5f5f5" }}>
+                                                <TableRow>
+                                                    <TableCell sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}>
+                                                        <strong>Invoice No</strong>
+                                                    </TableCell>
+                                                    <TableCell sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}>
+                                                        <strong>Invoice Date</strong>
+                                                    </TableCell>
+                                                    <TableCell sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}>
+                                                        <strong>Booked Date</strong>
+                                                    </TableCell>
+                                                    <TableCell sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}>
+                                                        <strong>Received Date</strong>
+                                                    </TableCell>
+                                                    <TableCell align="right" sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}>
+                                                        <strong>Amount</strong>
+                                                    </TableCell>
+                                                    <TableCell sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}>
+                                                        <strong>Comments</strong>
+                                                    </TableCell>
+                                                </TableRow>
+                                            </TableHead>
+                                            <TableBody>
+                                                {(selectedTask?.unpaid_invoices ?? []).map((inv: any, idx: number) => (
+                                                    <TableRow key={idx}>
+                                                        <TableCell sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}>
+                                                            {inv.invoice_no || "N/A"}
+                                                        </TableCell>
+                                                        <TableCell sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}>
+                                                            {inv.invoice_date || "N/A"}
+                                                        </TableCell>
+                                                        <TableCell sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}>
+                                                            {inv.booked_date || "N/A"}
+                                                        </TableCell>
+                                                        <TableCell sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}>
+                                                            {inv.received_date || "N/A"}
+                                                        </TableCell>
+                                                        <TableCell align="right" sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}>
+                                                            {inv.amount ? `$${inv.amount}` : "N/A"}
+                                                        </TableCell>
+                                                        <TableCell sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}>
+                                                            {inv.comments || "N/A"}
+                                                        </TableCell>
+                                                    </TableRow>
+                                                ))}
+                                            </TableBody>
+                                        </Table>
+                                    </Paper>
+                                </>
+                            )}
+
 
 
                         {/* Actions */}
